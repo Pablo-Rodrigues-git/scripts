@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Get the branch name
+branch_name=$(git symbolic-ref --short HEAD)
+
+# Define the regex pattern to match the desired branch format
+pattern="^([^/]+)/([^/]+)/BEES([[:alnum:]]+)-([[:alnum:]]+)$"
+
+# Check if the branch name matches the pattern
+if [[ $branch_name =~ $pattern ]]; then
+  # Extract the last two groups from the matched pattern
+  bees_number="${BASH_REMATCH[3]}"
+  bees_description="${BASH_REMATCH[4]}"
+  
+  # Build the prefix
+  prefix="\[BEES${bees_number}-${bees_description}\]"
+  
+  # Check if the commit message already contains the prefix
+  if ! grep -q "$prefix" "$1"; then
+    # Prepend the branch name to the commit message
+    sed -i.bak "1s/^/${prefix} /" "$1"
+  fi
+fi

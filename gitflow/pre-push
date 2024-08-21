@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# ANSI escape code to set the text color to red
+red='\033[0;31m'
+
+# ANSI escape code to reset the text color to the default
+no_color='\033[0m'
+
+# Fetch the latest commits
+git fetch
+
+# Get the current branch name
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+# Try to update the submodule and check for changes
+git submodule update --remote sdk-android-specs
+git status --porcelain | grep '^ M sdk-android-specs' &> /dev/null
+if [ $? -eq 0 ]; then
+  echo -e "${red}Submodule sdk-android-specs has changes. Please commit them before pushing.${no_color}"
+  exit 1
+fi
+
+# Check for the specific branch format and possible conflicts with master
+# if [[ $current_branch =~ .*/master/BEES.*-.* ]]; then
+#  git merge-base --is-ancestor master $current_branch &> /dev/null
+#  if [ $? -ne 0 ]; then
+#    echo -e "${red}There are conflicts between your branch and the remote master branch. Please #resolve them before pushing.${no_color}"
+#    exit 1
+#  fi
+#fi
+
+# If we've reached here, everything is fine
+exit 0

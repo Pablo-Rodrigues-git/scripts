@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# Function to handle sed command for different OS
+sed_inplace() {
+    if [[ $(uname) == "Darwin" ]]; then
+        sed -i "" "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
+# Function to increment version
+increment_version() {
+    local delimiter=.
+    local array=($(echo "$1" | tr $delimiter '\n'))
+    local version=""
+    if [ "$2" == "minor" ]; then
+        array[1]=$((array[1]+1))
+        array[2]=0  # Reset patch number when minor version is incremented
+    else
+        array[2]=$((array[2]+1))
+    fi
+    version="${array[0]}${delimiter}${array[1]}${delimiter}${array[2]}"
+    echo $version
+}
+
+# Function to increment release version
+increment_release_version() {
+    local delimiter=.
+    local array=($(echo "$1" | tr $delimiter '\n'))
+    local length=${#array[@]}
+    local version=""
+    if [ $length -eq 3 ]; then
+        version="${array[0]}${delimiter}${array[1]}${delimiter}${array[2]}${delimiter}1"
+    else
+        array[3]=$((array[3]+1))
+        version="${array[0]}${delimiter}${array[1]}${delimiter}${array[2]}${delimiter}${array[3]}"
+    fi
+    echo $version
+}
+
+# Function to compare versions
+compare_versions() {
+    IFS='.' read -ra ver1 <<< "$1"
+    IFS='.' read -ra ver2 <<< "$2"
+    for i in "${!ver1[@]}"; do
+        if ((10#${ver1[i]} > 10#${ver2[i]})); then
+            echo 1
+            return
+        elif ((10#${ver1[i]} < 10#${ver2[i]})); then
+            echo -1
+            return
+        fi
+    done
+    echo 0
+}
+
+# Get the current git branch
+branch=$(git rev-parse --abbrev-ref HEAD)
+
+# Define the relation of folder to version
+folder_version=("bees-checkout checkoutVersion") #"bees-browse browseVersion")
+
+# Get the branch to compare with
+if [[ $branch == *release* ]]; then
+    compare_branch=$(awk '/branch =/ {print $3}' .gitmodules)
+else
+    compare_branch=${1:-master}
+fi
+
+# Check if verbose mode is enabled
+verbose=0
+if [[ $* == *--verbose* ]]; then
+    verbose=1
+fi
+
+# Reset all versions to the versions in the compare_branch
+git checkout $compare_branch -- build.gradle
+
+# Get the list of changed files
+changed_files=$(git diff --name-only $compare_branch)
+
+# Check the git branch and increment version accordingly
+bumped_versions=()
+browse_version_incremented=false
+for pair in "${folder_version[@]}"; do
+    set -- $pair
+    folder=$1
+    version_var=$2
+    # Check if any changed files are in the current folder
+    folder_changed=false
+    for file in $changed_files; do
+        if [[ $file == $folder/* ]]; then
+            folder_changed=true
+            break
+        fi
+    done
+    if ! $folder_changed; then
+        continue
+    fi
+    version=$(grep "${version_var} =" build.gradle | awk -F\" '{print $2}')
+    local_version=$(git show $compare_branch:build.gradle | grep "${version_var} =" | awk -F\" '{print $2}')
+    if [[ $verbose -eq 1 ]]; then
+        echo "Comparing $version_var: local version is $version, local version in $compare_branch is $local_version"
+    fi
+    if [[ $(compare_versions $version $local_version) -gt 0 ]]; then
+        continue
+    fi
+    if [[ $branch == *release* ]]; then
+        new_version=$(increment_release_version $version)
+    elif [[ $branch == feature/* ]]; then
+        new_version=$(increment_version $version "minor")
+    else
+        new_version=$(increment_version $version "patch")
+    fi
+    bumped_versions+=("$version_var: $version -> $new_version")
+    sed_inplace "s/${version_var} = \"${version}\"/${version_var} = \"${new_version}\"/g" build.gradle
+done
+
+# Print bumped versions
+if [ ${#bumped_versions[@]} -eq 0 ]; then
+    echo "No versions were bumped."
+else
+    echo "Bumped versions:"
+    for version in "${bumped_versions[@]}"; do
+        echo $version
+    done
+fi
+
+# Add changes to the staging area
+git add build.gradle
+
+git submodule update --remote
+git add sdk-android-specs
